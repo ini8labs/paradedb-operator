@@ -3,7 +3,6 @@
 
 -- Enable required extensions
 CREATE EXTENSION IF NOT EXISTS pg_search;
-CREATE EXTENSION IF NOT EXISTS pg_analytics;
 CREATE EXTENSION IF NOT EXISTS vector;
 
 -- Products table with full-text search and vector embeddings
@@ -24,19 +23,15 @@ CREATE TABLE products (
 );
 
 -- Create BM25 index for full-text search using pg_search
-CALL paradedb.create_bm25(
-    index_name => 'products_search_idx',
-    table_name => 'products',
-    key_field => 'id',
-    text_fields => paradedb.field('name', weight => 2.0) ||
-                   paradedb.field('description') ||
-                   paradedb.field('category') ||
-                   paradedb.field('brand')
-);
+-- This enables fast full-text search with BM25 ranking
+CREATE INDEX products_search_idx ON products
+USING bm25 (id, name, description, category, brand)
+WITH (key_field='id');
 
 -- Create vector index for semantic similarity search
+-- Using HNSW for better performance (or ivfflat as alternative)
 CREATE INDEX products_embedding_idx ON products
-USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+USING hnsw (embedding vector_cosine_ops);
 
 -- Orders table for analytics
 CREATE TABLE orders (
@@ -69,13 +64,9 @@ CREATE TABLE reviews (
 );
 
 -- BM25 index for searching reviews
-CALL paradedb.create_bm25(
-    index_name => 'reviews_search_idx',
-    table_name => 'reviews',
-    key_field => 'id',
-    text_fields => paradedb.field('title', weight => 1.5) ||
-                   paradedb.field('content')
-);
+CREATE INDEX reviews_search_idx ON reviews
+USING bm25 (id, title, content)
+WITH (key_field='id');
 
 -- Function to update product rating from reviews
 CREATE OR REPLACE FUNCTION update_product_rating()

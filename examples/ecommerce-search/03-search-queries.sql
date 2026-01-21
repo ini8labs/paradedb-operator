@@ -5,70 +5,71 @@
 -- PART 1: FULL-TEXT SEARCH WITH BM25 (pg_search)
 -- ============================================================
 
--- Basic full-text search: Find products matching "wireless headphones"
+-- Basic full-text search: Find products matching "wireless" in name
+-- Note: pg_search uses field:term syntax for queries
 SELECT id, name, description, price, rating,
        paradedb.score(id) as relevance_score
 FROM products
-WHERE products @@@ 'wireless headphones'
+WHERE products @@@ 'name:wireless'
 ORDER BY relevance_score DESC
 LIMIT 10;
 
--- Phrase search: Find exact phrase "noise cancellation"
+-- Multi-field search: Find products with "wireless" in name OR description
+SELECT id, name, price, rating,
+       paradedb.score(id) as relevance_score
+FROM products
+WHERE products @@@ 'name:wireless OR description:wireless'
+ORDER BY relevance_score DESC
+LIMIT 10;
+
+-- Search for "headphones" across name field
+SELECT id, name, price,
+       paradedb.score(id) as relevance_score
+FROM products
+WHERE products @@@ 'name:headphones'
+ORDER BY relevance_score DESC;
+
+-- Boolean search: Products with "wireless" AND "battery" in description
 SELECT id, name, description, price,
        paradedb.score(id) as relevance_score
 FROM products
-WHERE products @@@ '"noise cancellation"'
+WHERE products @@@ 'description:wireless AND description:battery'
 ORDER BY relevance_score DESC;
 
--- Boolean search: Products with "wireless" AND "battery" but NOT "earbuds"
-SELECT id, name, description, price,
+-- Search for "smart" products
+SELECT id, name, category, price,
        paradedb.score(id) as relevance_score
 FROM products
-WHERE products @@@ 'wireless AND battery AND NOT earbuds'
+WHERE products @@@ 'name:smart OR description:smart'
 ORDER BY relevance_score DESC;
 
--- Fuzzy search: Find products even with typos (e.g., "headpones")
-SELECT id, name, description, price,
-       paradedb.score(id) as relevance_score
-FROM products
-WHERE products @@@ 'headpones~1'  -- Allow 1 character edit distance
-ORDER BY relevance_score DESC;
-
--- Boosted field search: Prioritize matches in name over description
-SELECT id, name, description, price,
-       paradedb.score(id) as relevance_score
-FROM products
-WHERE products @@@ 'name:gaming^2 OR description:gaming'
-ORDER BY relevance_score DESC;
-
--- Search with filters: Full-text search with price and category constraints
+-- Search within specific category (combine BM25 with SQL filters)
 SELECT id, name, category, price, rating,
        paradedb.score(id) as relevance_score
 FROM products
-WHERE products @@@ 'smart'
-  AND price BETWEEN 100 AND 500
+WHERE products @@@ 'description:premium'
   AND category = 'Electronics'
 ORDER BY relevance_score DESC;
 
--- Highlight search results
-SELECT id, name,
-       paradedb.highlight(description, 'wireless') as highlighted_desc,
-       price
+-- Search with price filter
+SELECT id, name, price, rating,
+       paradedb.score(id) as relevance_score
 FROM products
-WHERE products @@@ 'wireless'
-LIMIT 5;
+WHERE products @@@ 'name:wireless OR name:smart'
+  AND price BETWEEN 100 AND 500
+ORDER BY relevance_score DESC;
 
 -- ============================================================
--- PART 2: ANALYTICS WITH DuckDB (pg_analytics)
+-- PART 2: ANALYTICS QUERIES
 -- ============================================================
 
--- Sales summary by region using DuckDB acceleration
+-- Sales summary by region
 SELECT
     region,
     COUNT(*) as order_count,
-    SUM(total_price) as total_revenue,
-    AVG(total_price) as avg_order_value,
-    MAX(total_price) as max_order
+    SUM(total_price)::numeric(10,2) as total_revenue,
+    AVG(total_price)::numeric(10,2) as avg_order_value,
+    MAX(total_price)::numeric(10,2) as max_order
 FROM orders
 GROUP BY region
 ORDER BY total_revenue DESC;
@@ -78,8 +79,8 @@ SELECT
     p.name,
     p.category,
     COUNT(o.id) as units_sold,
-    SUM(o.total_price) as total_revenue,
-    AVG(o.quantity) as avg_quantity_per_order
+    SUM(o.total_price)::numeric(10,2) as total_revenue,
+    AVG(o.quantity)::numeric(10,2) as avg_quantity_per_order
 FROM orders o
 JOIN products p ON o.product_id = p.id
 WHERE o.status IN ('delivered', 'shipped')
@@ -91,7 +92,7 @@ LIMIT 10;
 SELECT
     DATE_TRUNC('day', created_at) as sale_date,
     COUNT(*) as order_count,
-    SUM(total_price) as daily_revenue
+    SUM(total_price)::numeric(10,2) as daily_revenue
 FROM orders
 WHERE created_at >= NOW() - INTERVAL '30 days'
 GROUP BY DATE_TRUNC('day', created_at)
@@ -102,8 +103,8 @@ SELECT
     p.category,
     COUNT(DISTINCT p.id) as product_count,
     COUNT(o.id) as total_orders,
-    SUM(o.total_price) as total_revenue,
-    AVG(p.rating) as avg_category_rating
+    COALESCE(SUM(o.total_price), 0)::numeric(10,2) as total_revenue,
+    AVG(p.rating)::numeric(2,1) as avg_category_rating
 FROM products p
 LEFT JOIN orders o ON p.id = o.product_id
 GROUP BY p.category
@@ -118,7 +119,7 @@ SELECT
         ELSE 'Premium'
     END as customer_segment,
     COUNT(*) as customer_count,
-    AVG(total_spent) as avg_spent
+    AVG(total_spent)::numeric(10,2) as avg_spent
 FROM (
     SELECT customer_id, SUM(total_price) as total_spent
     FROM orders
@@ -134,31 +135,36 @@ ORDER BY avg_spent DESC;
 -- Note: In production, you would generate embeddings using an ML model
 -- like OpenAI's text-embedding-ada-002 or sentence-transformers
 
--- Find similar products using vector similarity (cosine distance)
--- This example assumes embeddings are populated
+-- Example: Find similar products using vector similarity (cosine distance)
+-- This requires embeddings to be populated in the embedding column
 /*
+-- Generate a query embedding and find similar products
 SELECT id, name, description, price,
-       1 - (embedding <=> query_embedding) as similarity
+       1 - (embedding <=> '[your_query_embedding_here]'::vector) as similarity
 FROM products
 WHERE embedding IS NOT NULL
-ORDER BY embedding <=> query_embedding
+ORDER BY embedding <=> '[your_query_embedding_here]'::vector
 LIMIT 5;
 */
+
+-- Test vector operations (verify extension is working)
+SELECT '[1,2,3]'::vector <-> '[4,5,6]'::vector as euclidean_distance;
+SELECT '[1,2,3]'::vector <=> '[4,5,6]'::vector as cosine_distance;
 
 -- ============================================================
 -- PART 4: HYBRID SEARCH (Combining BM25 + Vector)
 -- ============================================================
 
--- Hybrid search combining keyword relevance with semantic similarity
+-- Hybrid search combines keyword relevance with semantic similarity
 -- This provides the best of both worlds: exact matches + semantic understanding
 /*
 WITH keyword_results AS (
     SELECT id, paradedb.score(id) as bm25_score
     FROM products
-    WHERE products @@@ 'wireless headphones'
+    WHERE products @@@ 'name:wireless OR description:wireless'
 ),
 vector_results AS (
-    SELECT id, 1 - (embedding <=> $query_embedding) as vector_score
+    SELECT id, 1 - (embedding <=> '[query_embedding]'::vector) as vector_score
     FROM products
     WHERE embedding IS NOT NULL
 )
@@ -173,16 +179,14 @@ LIMIT 10;
 */
 
 -- ============================================================
--- PART 5: REVIEW SEARCH AND SENTIMENT ANALYSIS
+-- PART 5: REVIEW SEARCH
 -- ============================================================
 
--- Search reviews for specific topics
-SELECT r.id, r.title, r.content, r.rating, p.name as product_name,
-       paradedb.score(r.id) as relevance
+-- Search reviews by content
+SELECT r.id, r.title, r.content, r.rating, p.name as product_name
 FROM reviews r
 JOIN products p ON r.product_id = p.id
-WHERE r @@@ 'comfortable OR comfort'
-ORDER BY relevance DESC;
+WHERE r.title ILIKE '%comfort%' OR r.content ILIKE '%comfort%';
 
 -- Find most helpful reviews for a product
 SELECT r.title, r.content, r.rating, r.helpful_votes
@@ -211,14 +215,14 @@ ORDER BY p.review_count DESC;
 -- Get facet counts for category filter
 SELECT category, COUNT(*) as product_count
 FROM products
-WHERE products @@@ 'wireless'
+WHERE products @@@ 'description:smart OR name:smart'
 GROUP BY category
 ORDER BY product_count DESC;
 
 -- Get facet counts for brand filter
 SELECT brand, COUNT(*) as product_count
 FROM products
-WHERE products @@@ 'wireless'
+WHERE products @@@ 'name:wireless OR description:wireless'
 GROUP BY brand
 ORDER BY product_count DESC;
 
@@ -233,7 +237,7 @@ SELECT
     END as price_range,
     COUNT(*) as product_count
 FROM products
-WHERE products @@@ 'wireless OR smart'
+WHERE products @@@ 'name:wireless OR name:smart'
 GROUP BY price_range
 ORDER BY MIN(price);
 
@@ -242,6 +246,23 @@ SELECT
     FLOOR(rating) as rating_bucket,
     COUNT(*) as product_count
 FROM products
-WHERE products @@@ 'electronics'
+WHERE category = 'Electronics'
 GROUP BY FLOOR(rating)
 ORDER BY rating_bucket DESC;
+
+-- ============================================================
+-- PART 7: USEFUL ADMIN QUERIES
+-- ============================================================
+
+-- Check BM25 index status
+SELECT * FROM paradedb.index_info('products_search_idx');
+
+-- List all BM25 indexes
+SELECT indexname, indexdef
+FROM pg_indexes
+WHERE indexdef LIKE '%bm25%';
+
+-- Check installed extensions
+SELECT name, default_version, installed_version
+FROM pg_available_extensions
+WHERE name IN ('pg_search', 'vector');
