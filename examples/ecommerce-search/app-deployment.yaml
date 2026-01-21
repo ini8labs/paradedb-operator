@@ -32,7 +32,8 @@ spec:
     spec:
       containers:
       - name: demo
-        image: aotala/paradedb-ecommerce-demo:latest
+        image: aotala/paradedb-ecommerce-demo:v2
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
         envFrom:
