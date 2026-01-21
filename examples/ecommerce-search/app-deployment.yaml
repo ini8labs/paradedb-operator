@@ -1,0 +1,140 @@
+---
+# Sample application deployment that uses ParadeDB
+# This demonstrates a typical application architecture with ParadeDB backend
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ecommerce-app-config
+data:
+  DB_HOST: "ecommerce-db"
+  DB_PORT: "5432"
+  DB_NAME: "ecommerce"
+  DB_USER: "postgres"
+  # Additional app configuration
+  SEARCH_RESULTS_LIMIT: "20"
+  ENABLE_VECTOR_SEARCH: "true"
+  ENABLE_ANALYTICS: "true"
+
+---
+# Application deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ecommerce-api
+  labels:
+    app: ecommerce-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ecommerce-api
+  template:
+    metadata:
+      labels:
+        app: ecommerce-api
+    spec:
+      containers:
+      - name: api
+        image: your-registry/ecommerce-api:latest  # Replace with your image
+        ports:
+        - containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: ecommerce-app-config
+        env:
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: ecommerce-db-credentials
+              key: password
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 20
+
+---
+# Service to expose the API
+apiVersion: v1
+kind: Service
+metadata:
+  name: ecommerce-api
+spec:
+  selector:
+    app: ecommerce-api
+  ports:
+  - port: 80
+    targetPort: 8080
+  type: ClusterIP
+
+---
+# Optional: Ingress for external access
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ecommerce-api-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: ecommerce.example.com  # Replace with your domain
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: ecommerce-api
+            port:
+              number: 80
+
+---
+# CronJob for analytics aggregation (optional)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: analytics-aggregator
+spec:
+  schedule: "0 */6 * * *"  # Every 6 hours
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: aggregator
+            image: postgres:16-alpine
+            command:
+            - /bin/sh
+            - -c
+            - |
+              psql -h $DB_HOST -U $DB_USER -d $DB_NAME -c "
+                -- Refresh materialized views for analytics
+                REFRESH MATERIALIZED VIEW IF EXISTS daily_sales_summary;
+                REFRESH MATERIALIZED VIEW IF EXISTS product_performance;
+              "
+            envFrom:
+            - configMapRef:
+                name: ecommerce-app-config
+            env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ecommerce-db-credentials
+                  key: password
+          restartPolicy: OnFailure

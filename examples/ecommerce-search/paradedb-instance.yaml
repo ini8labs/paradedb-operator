@@ -1,0 +1,55 @@
+---
+# ParadeDB instance for e-commerce search application
+# This example enables all ParadeDB extensions for a complete search solution
+apiVersion: database.paradedb.io/v1alpha1
+kind: ParadeDB
+metadata:
+  name: ecommerce-db
+  labels:
+    app: ecommerce
+    environment: demo
+spec:
+  # Single replica for demo (use 3 for production HA)
+  replicas: 1
+
+  # ParadeDB image with all extensions
+  image: "paradedb/paradedb:latest"
+
+  # Storage configuration
+  storage:
+    size: "10Gi"
+    storageClassName: "standard"  # Change based on your cluster
+
+  # Enable all ParadeDB extensions
+  extensions:
+    pgSearch: true      # Full-text search with BM25
+    pgAnalytics: true   # Analytics with DuckDB
+    pgVector: true      # Vector similarity search for AI
+
+  # Authentication
+  auth:
+    database: "ecommerce"
+
+  # Resource limits suitable for demo
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+
+  # PostgreSQL tuning for search workloads
+  postgresConfig:
+    max_connections: "100"
+    shared_buffers: "256MB"
+    effective_cache_size: "1GB"
+    work_mem: "32MB"
+    maintenance_work_mem: "128MB"
+
+  # Enable monitoring
+  monitoring:
+    enabled: true
+
+  # Expose via ClusterIP (use LoadBalancer for external access)
+  serviceType: ClusterIP
