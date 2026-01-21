@@ -181,7 +181,7 @@ func main() {
 	if err := (&controller.ParadeDBReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("paradedb-controller"),
+		Recorder: mgr.GetEventRecorderFor("paradedb-controller"), //nolint:staticcheck // TODO: migrate to GetEventRecorder
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ParadeDB")
 		os.Exit(1)

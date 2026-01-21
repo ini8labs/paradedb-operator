@@ -103,10 +103,7 @@ func (r *ParadeDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 
 			// Perform cleanup operations
-			if err := r.finalizeParadeDB(ctx, paradedb); err != nil {
-				log.Error(err, "Failed to finalize ParadeDB")
-				return ctrl.Result{}, err
-			}
+			r.finalizeParadeDB(ctx, paradedb)
 
 			// Remove finalizer
 			controllerutil.RemoveFinalizer(paradedb, paradedbFinalizer)
@@ -235,7 +232,7 @@ func (r *ParadeDBReconciler) handleError(ctx context.Context, paradedb *database
 }
 
 // finalizeParadeDB performs cleanup when ParadeDB is being deleted
-func (r *ParadeDBReconciler) finalizeParadeDB(ctx context.Context, paradedb *databasev1alpha1.ParadeDB) error {
+func (r *ParadeDBReconciler) finalizeParadeDB(ctx context.Context, paradedb *databasev1alpha1.ParadeDB) {
 	log := logf.FromContext(ctx)
 	log.Info("Finalizing ParadeDB", "name", paradedb.Name)
 
@@ -243,7 +240,6 @@ func (r *ParadeDBReconciler) finalizeParadeDB(ctx context.Context, paradedb *dat
 	// Add any additional cleanup logic here if needed
 
 	r.Recorder.Event(paradedb, corev1.EventTypeNormal, "Deleted", "ParadeDB instance deleted successfully")
-	return nil
 }
 
 // reconcileCredentialsSecret creates or updates the credentials secret
