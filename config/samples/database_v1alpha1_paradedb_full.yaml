@@ -1,0 +1,155 @@
+apiVersion: database.paradedb.io/v1alpha1
+kind: ParadeDB
+metadata:
+  labels:
+    app.kubernetes.io/name: paradedb-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: paradedb-full
+spec:
+  # ParadeDB image
+  image: "paradedb/paradedb:latest"
+
+  # Number of replicas (HA configuration)
+  replicas: 3
+
+  # PostgreSQL version
+  postgresVersion: "16"
+
+  # Storage configuration
+  storage:
+    size: "50Gi"
+    storageClassName: "standard"
+    accessModes:
+      - ReadWriteOnce
+    # Separate WAL storage for better performance
+    walStorage:
+      size: "10Gi"
+      storageClassName: "standard"
+
+  # Authentication configuration
+  auth:
+    database: "paradedb"
+    # Custom pg_hba rules
+    pgHBA:
+      - "host all all 10.0.0.0/8 scram-sha-256"
+
+  # TLS configuration
+  tls:
+    enabled: true
+    secretRef:
+      name: paradedb-tls-secret
+    # Or use cert-manager
+    # certManager:
+    #   enabled: true
+    #   issuerRef:
+    #     name: letsencrypt-prod
+    #     kind: ClusterIssuer
+
+  # Connection pooling with PgBouncer
+  connectionPooling:
+    enabled: true
+    image: "bitnami/pgbouncer:latest"
+    poolMode: "transaction"
+    maxClientConnections: 200
+    defaultPoolSize: 25
+    minPoolSize: 5
+    reservePoolSize: 10
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "256Mi"
+        cpu: "200m"
+
+  # Backup configuration
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"  # 2 AM daily
+    retentionPolicy:
+      keepLast: 7
+      keepDaily: 7
+      keepWeekly: 4
+    # S3-compatible storage for backups
+    s3:
+      endpoint: "https://s3.amazonaws.com"
+      bucket: "paradedb-backups"
+      region: "us-east-1"
+      path: "production"
+      secretRef:
+        name: s3-backup-credentials
+
+  # Monitoring configuration
+  monitoring:
+    enabled: true
+    image: "quay.io/prometheuscommunity/postgres-exporter:latest"
+    port: 9187
+    serviceMonitor:
+      enabled: true
+      labels:
+        release: prometheus
+      interval: "30s"
+    resources:
+      requests:
+        memory: "32Mi"
+        cpu: "25m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"
+
+  # ParadeDB extensions
+  extensions:
+    pgSearch: true
+    pgAnalytics: true
+    pgVector: true
+    additional:
+      - "pg_stat_statements"
+      - "uuid-ossp"
+
+  # Custom PostgreSQL configuration
+  postgresConfig:
+    max_connections: "200"
+    shared_buffers: "512MB"
+    effective_cache_size: "2GB"
+    maintenance_work_mem: "256MB"
+    work_mem: "16MB"
+    wal_buffers: "16MB"
+    checkpoint_completion_target: "0.9"
+    random_page_cost: "1.1"
+    effective_io_concurrency: "200"
+
+  # Resource limits
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+
+  # Service type
+  serviceType: LoadBalancer
+
+  # Node affinity
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - paradedb
+          topologyKey: "kubernetes.io/hostname"
+
+  # Pod security context
+  podSecurityContext:
+    fsGroup: 999
+    runAsUser: 999
+    runAsGroup: 999
+
+  # Container security context
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    runAsNonRoot: true
