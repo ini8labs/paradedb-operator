@@ -1,0 +1,50 @@
+apiVersion: database.paradedb.io/v1alpha1
+kind: ParadeDB
+metadata:
+  labels:
+    app.kubernetes.io/name: paradedb-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: paradedb-sample
+spec:
+  # ParadeDB image (uses default if not specified)
+  image: "paradedb/paradedb:latest"
+
+  # Number of replicas
+  replicas: 1
+
+  # PostgreSQL version
+  postgresVersion: "16"
+
+  # Storage configuration
+  storage:
+    size: "10Gi"
+    # storageClassName: "standard"  # Optional: specify storage class
+
+  # Authentication configuration
+  auth:
+    database: "paradedb"
+    # superuserSecretRef:  # Optional: use existing secret
+    #   name: my-postgres-secret
+
+  # ParadeDB extensions
+  extensions:
+    pgSearch: true
+    pgAnalytics: true
+    pgVector: false
+
+  # Resource limits (optional)
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+  # Monitoring (enabled by default)
+  monitoring:
+    enabled: true
+    port: 9187
+
+  # Service type
+  serviceType: ClusterIP
