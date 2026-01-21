@@ -3,31 +3,29 @@
 This example demonstrates a complete e-commerce search application powered by ParadeDB, showcasing:
 
 - **Full-text search** with BM25 ranking (pg_search)
-- **Analytics queries** accelerated by DuckDB (pg_analytics)
+- **Analytics queries** for sales and performance metrics
 - **Vector similarity search** for AI-powered recommendations (pgvector)
-- **Hybrid search** combining keyword and semantic search
+- **Web UI demo** with search interface and analytics dashboard
 
 ## Architecture
 
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│                 │     │                 │     │                 │
-│  E-Commerce     │────▶│   ParadeDB      │◀────│   Analytics     │
-│  API Service    │     │   (Kubernetes)  │     │   CronJob       │
-│                 │     │                 │     │                 │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-        │                       │
-        │                       │
-        ▼                       ▼
 ┌─────────────────┐     ┌─────────────────┐
-│   pg_search     │     │  pg_analytics   │
-│   (BM25 Search) │     │  (DuckDB)       │
+│                 │     │                 │
+│   Web UI Demo   │────▶│   ParadeDB      │
+│   (Flask App)   │     │   (Kubernetes)  │
+│                 │     │                 │
 └─────────────────┘     └─────────────────┘
-        │
+        │                       │
+        │                       ├── pg_search (BM25)
+        │                       ├── pgvector (AI)
+        │                       └── PostgreSQL
         ▼
 ┌─────────────────┐
-│   pgvector      │
-│   (AI Search)   │
+│  Browser UI     │
+│  - Search       │
+│  - Analytics    │
+│  - Facets       │
 └─────────────────┘
 ```
 
@@ -75,12 +73,27 @@ psql -h localhost -U postgres -d ecommerce -f 02-sample-data.sql
 psql -h localhost -U postgres -d ecommerce -f 03-search-queries.sql
 ```
 
-### 4. Deploy Sample Application (Optional)
+### 4. Deploy the Demo Web Application
 
 ```bash
-# Deploy the application stack
+# Deploy the demo application
 kubectl apply -f app-deployment.yaml
+
+# Wait for the pod to be ready
+kubectl wait --for=condition=Ready pod -l app=ecommerce-demo --timeout=120s
+
+# Access the demo UI
+kubectl port-forward svc/ecommerce-demo 8080:80
+
+# Open http://localhost:8080 in your browser
 ```
+
+The demo application provides:
+- **Product Search**: Full-text search with BM25 relevance scoring
+- **Faceted Filtering**: Filter by category, brand, and price range
+- **Analytics Dashboard**: Sales by region, top products, category performance
+
+Docker image: `aotala/paradedb-ecommerce-demo:latest`
 
 ## Features Demonstrated
 
@@ -89,23 +102,27 @@ kubectl apply -f app-deployment.yaml
 ParadeDB's pg_search extension provides Elasticsearch-like full-text search capabilities:
 
 ```sql
--- Basic BM25 search
+-- Basic BM25 search with field:term syntax
 SELECT id, name, price, paradedb.score(id) as relevance
 FROM products
-WHERE products @@@ 'wireless headphones'
+WHERE products @@@ 'name:wireless'
 ORDER BY relevance DESC;
 
--- Phrase search
-SELECT * FROM products WHERE products @@@ '"noise cancellation"';
+-- Multi-field search
+SELECT id, name, price, paradedb.score(id) as relevance
+FROM products
+WHERE products @@@ 'name:wireless OR description:wireless'
+ORDER BY relevance DESC;
 
 -- Boolean operators
-SELECT * FROM products WHERE products @@@ 'wireless AND battery NOT earbuds';
+SELECT * FROM products
+WHERE products @@@ 'description:wireless AND description:battery';
 
--- Fuzzy search (handles typos)
-SELECT * FROM products WHERE products @@@ 'headpones~1';
-
--- Boosted fields
-SELECT * FROM products WHERE products @@@ 'name:gaming^2 OR description:gaming';
+-- Search with SQL filters
+SELECT * FROM products
+WHERE products @@@ 'name:smart'
+  AND category = 'Electronics'
+  AND price BETWEEN 100 AND 500;
 ```
 
 ### Analytics (pg_analytics)
@@ -172,10 +189,15 @@ ORDER BY score DESC;
 examples/ecommerce-search/
 ├── README.md                 # This file
 ├── paradedb-instance.yaml    # ParadeDB custom resource
-├── 01-schema.sql             # Database schema with indexes
+├── 01-schema.sql             # Database schema with BM25 indexes
 ├── 02-sample-data.sql        # Sample products, orders, reviews
 ├── 03-search-queries.sql     # Example search and analytics queries
-└── app-deployment.yaml       # Sample application deployment
+├── app-deployment.yaml       # Kubernetes deployment for demo app
+└── demo-app/                 # Demo web application source
+    ├── app.py                # Flask backend with search API
+    ├── templates/index.html  # Web UI for search and analytics
+    ├── requirements.txt      # Python dependencies
+    └── Dockerfile            # Container build file
 ```
 
 ## Configuration Options
@@ -190,20 +212,20 @@ examples/ecommerce-search/
 | `extensions.pgAnalytics` | Enable analytics | `true` |
 | `extensions.pgVector` | Enable vector search | `true` |
 
-### Search Tuning
+### BM25 Index Creation
 
-Adjust BM25 index for your use case:
+Create BM25 indexes for full-text search:
 
 ```sql
--- Create index with custom field weights
-CALL paradedb.create_bm25(
-    index_name => 'products_search_idx',
-    table_name => 'products',
-    key_field => 'id',
-    text_fields => paradedb.field('name', weight => 3.0) ||   -- Title most important
-                   paradedb.field('description', weight => 1.0) ||
-                   paradedb.field('brand', weight => 2.0)
-);
+-- Create BM25 index on products table
+CREATE INDEX products_search_idx ON products
+USING bm25 (id, name, description, category, brand)
+WITH (key_field='id');
+
+-- Create BM25 index on reviews table
+CREATE INDEX reviews_search_idx ON reviews
+USING bm25 (id, title, content)
+WITH (key_field='id');
 ```
 
 ## Production Considerations
